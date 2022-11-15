@@ -5,12 +5,14 @@ import (
     "database/sql"
     "flag"
     "fmt"
-    "log"
     "net/http"
     "os"
+    "sync"
     "time"
 
 	"fitness.zioncastillo.net/internal/data"
+    "fitness.zioncastillo.net/internal/jsonlog"
+    "fitness.zioncastillo.net/internal/mailer"
     _ "github.com/lib/pq"
 )
 
@@ -34,6 +36,13 @@ type config struct {
         maxIdleConns int
         maxIdleTime string
     }
+    smtp struct {
+        host     string
+        port     int
+        username string
+        password string
+        sender   string
+    }
 }
 
 // Define an application struct to hold the dependencies for our HTTP handlers, helpers,
@@ -41,8 +50,10 @@ type config struct {
 // logger, but it will grow to include a lot more as our build progresses.
 type application struct {
     config config
-    logger *log.Logger
+    logger *jsonlog.Logger
 	models data.Models
+    mailer mailer.Mailer
+    wg sync.WaitGroup
 }
 
 func main() {
@@ -58,24 +69,31 @@ func main() {
 	flag.IntVar(&cfg.db.maxIdleConns, "db-max-idle-conns", 25, "PostgreSQL max idle connection")
 	flag.StringVar(&cfg.db.maxIdleTime, "db-max-idle-time", "15m", "PostgreSQL max connection idle time")
 
+    flag.StringVar(&cfg.smtp.host, "smpt-host", "smtp.mailtrap.io", "SMPT host")
+    flag.IntVar(&cfg.smtp.port, "smpt-port", 25, "SMPT port")
+    flag.StringVar(&cfg.smtp.username, "smpt-username", "2003542b049ac5", "SMPT username")
+    flag.StringVar(&cfg.smtp.password, "smpt-password", "641e59bb93068e", "SMPT Password")
+    flag.StringVar(&cfg.smtp.sender, "smpt-sender", "BIO <no-reply@fitness.zioncastillo.net>", "SMPT Sender")
+
 	flag.Parse()
     // Initialize a new logger which writes messages to the standard out stream, 
     // prefixed with the current date and time.
-    logger := log.New(os.Stdout, "", log.Ldate | log.Ltime)
+    logger := jsonlog.New(os.Stdout, jsonlog.LevelInfo)
 
     // Create a connection pool
     db, err := openDB(cfg)
     if err != nil {
-        logger.Fatal(err)
+        logger.PrintFatal(err, nil)
     }
     defer db.Close()
-	logger.Println("datatbase connection pool established")
+	logger.PrintInfo("datatbase connection pool established", nil)
     // Declare an instance of the application struct, containing the config struct and 
     // the logger.
     app := &application{
 		config: cfg,
 		logger: logger,
 		models: data.NewModels(db),
+        mailer: mailer.New(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 	}
 
     // Declare a HTTP server with some sensible timeout settings, which listens on the
@@ -90,9 +108,9 @@ func main() {
     }
 
     // Start the HTTP server.
-    logger.Printf("starting %s server on %s", cfg.env, srv.Addr)
+    logger.PrintInfo("starting server on port 4000", nil)
     err = srv.ListenAndServe()
-    logger.Fatal(err)
+    logger.PrintFatal(err, nil)
 }
 
 // Open DB function to return a *sql.DB connection pool
