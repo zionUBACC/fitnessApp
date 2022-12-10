@@ -1,3 +1,5 @@
+// Filename: cmd/api/server.go
+
 package main
 
 import (
@@ -51,7 +53,6 @@ func (app *application) serve() error {
 		})
 		app.wg.Wait()
 		shutdownError <- nil
-
 	}()
 
 	// Start our server

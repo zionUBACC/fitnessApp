@@ -149,3 +149,19 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst int
 	return nil
 }
 
+// background accepts a function as its parameter
+func (app *application) background(fn func()) {
+	// Increment the WaitGroup counter
+	app.wg.Add(1)
+	go func() {
+		defer app.wg.Done()
+		// Recover from panics
+		defer func() {
+			if err := recover(); err != nil {
+				app.logger.PrintError(fmt.Errorf("%s", err), nil)
+			}
+		}()
+		// Execute fn()
+		fn()
+	}()
+}

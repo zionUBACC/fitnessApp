@@ -57,7 +57,7 @@ func (app* application) saveFitnessHandler(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (app *application) listFitnessRecord(w http.ResponseWriter, r *http.Request) {
+func (app *application) listFitnessHandler(w http.ResponseWriter, r *http.Request) {
 
 	//Create input struct to hold our query Parameters
 	var input struct {

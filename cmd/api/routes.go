@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"github.com/julienschmidt/httprouter"
 )
-func (app *application) routes () *httprouter.Router{
+func (app *application) routes () http.Handler{
 	
 	router := httprouter.New()
 	
@@ -14,8 +14,11 @@ func (app *application) routes () *httprouter.Router{
 	router.MethodNotAllowed = http.HandlerFunc(app.methodNotAllowedResponse)
 	
 	router.HandlerFunc(http.MethodGet, "/v1/healthcheck", app.healthcheckHandler)
-	router.HandlerFunc(http.MethodPost, "/v1/insert", app.saveFitnessHandler)
+	router.HandlerFunc(http.MethodPost, "/v1/records/insert", app.requirePermission("dailyfitness:read", app.saveFitnessHandler))
+	router.HandlerFunc(http.MethodGet, "/v1/records/show", app.requirePermission("dailyfitness:read", app.listFitnessHandler))
 	router.HandlerFunc(http.MethodPost, "/v1/users", app.registerUserHandler)
 	router.HandlerFunc(http.MethodPut, "/v1/users/activated", app.activateUserHandler)
-	return router
+	router.HandlerFunc(http.MethodPost, "/v1/tokens/authentication", app.createAuthenticationTokenHandler)
+	
+	return app.recoverPanic(app.enableCORS(app.rateLimit(app.authenticate(router))))
 }

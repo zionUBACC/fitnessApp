@@ -1,50 +1,53 @@
-//FILENAME: Interal/data/users.go
-
+// Filename: internal/data/users.go
 package data
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"time"
-
 	"fitness.zioncastillo.net/internal/validator"
 	"golang.org/x/crypto/bcrypt"
 )
-
 var (
 	ErrDuplicateEmail = errors.New("duplicate email")
 )
 
+// Declare an AnonymousUser, no id, no name, no email, no password
+var AnonymousUser = &User{}
+
 type User struct {
-	ID int64 	`json:"id"`
+	ID        int64     `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
-	Name string `json:"name"`
-	Email string `json:"email"`
-	Password password `json:"-"`
-	Activated bool `json:"activated"`
-	Version int `json:"-"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	Password  password  `json:"-"`
+	Activated bool      `json:"activated"`
+	Version   int       `json:"-"`
 }
 
-//Create a customer password type
+// Check if a user is anonymous
+func (u *User) IsAnonymous() bool {
+	return u == AnonymousUser
+}
+
+// Create a customer password type
 type password struct {
 	plaintext *string
-	hash []byte 
+	hash      []byte
 }
-
-//The set() Method stores the hash of the plaintexxt password
+// The Set() method stores the hash of the plaintext password
 func (p *password) Set(plaintextPassword string) error {
-	hash,err := bcrypt.GenerateFromPassword([]byte(plaintextPassword), 12)
+	hash, err := bcrypt.GenerateFromPassword([]byte(plaintextPassword), 12)
 	if err != nil {
 		return err
 	}
 	p.plaintext = &plaintextPassword
 	p.hash = hash
-
 	return nil
 }
-
-//The Matches() method checks if the supplied password is correct
+// The Matches() method checks of the supplied password is correct
 func (p *password) Matches(plaintextPassword string) (bool, error) {
 	err := bcrypt.CompareHashAndPassword(p.hash, []byte(plaintextPassword))
 	if err != nil {
@@ -57,56 +60,50 @@ func (p *password) Matches(plaintextPassword string) (bool, error) {
 	}
 	return true, nil
 }
-
-//Validate the client request
+// Validate the client request
 func ValidateEmail(v *validator.Validator, email string) {
 	v.Check(email != "", "email", "must be provided")
-	//v.Check(validator.Matches(email, validator.EmailRX), "email", "must be a valid email address")
+	v.Check(validator.Matches(email, validator.EmailRX), "email", "must be a valid email address")
 }
-
 func ValidatePasswordPlaintext(v *validator.Validator, password string) {
 	v.Check(password != "", "password", "must be provided")
 	v.Check(len(password) >= 8, "password", "must be at least 8 bytes long")
-	v.Check(len(password) <= 72, "password", "must be less than 72 bytes long")
+	v.Check(len(password) <= 72, "password", "must not be more than 72 bytes long")
 }
-
 func ValidateUser(v *validator.Validator, user *User) {
 	v.Check(user.Name != "", "name", "must be provided")
-	v.Check(len(user.Name) <= 500, "name", "must be less than 500 bytes long")
-	//Validate email
+	v.Check(len(user.Name) <= 500, "name", "must not be more than 500 bytes long")
+	// validate the email
 	ValidateEmail(v, user.Email)
+	// validate the password
 	if user.Password.plaintext != nil {
 		ValidatePasswordPlaintext(v, *user.Password.plaintext)
 	}
-	//Ensure a hash of the password was created
+	// Ensure a hash of the password was created
 	if user.Password.hash == nil {
-		panic("Missing Password hash for the user")
+		panic("missing password hash for the user")
 	}
-
 }
-
 // Create our user model
 type UserModel struct {
 	DB *sql.DB
 }
-
-func(m UserModel) Insert(user *User) error {
-	//create our query
+// Create a new user
+func (m UserModel) Insert(user *User) error {
+	// Create our query
 	query := `
-	INSERT INTO users (name,email,password_hash,activated)
-	VALUES ($1, $2, $3, $4)
-	RETURNING id, created_at, version
+	    INSERT INTO users (name, email, password_hash, activated)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, created_at, version
 	`
-	args :=[]interface{}{
+	args := []interface{}{
 		user.Name,
 		user.Email,
 		user.Password.hash,
 		user.Activated,
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-
 	err := m.DB.QueryRowContext(ctx, query, args...).Scan(&user.ID, &user.CreatedAt, &user.Version)
 	if err != nil {
 		switch {
@@ -116,24 +113,19 @@ func(m UserModel) Insert(user *User) error {
 			return err
 		}
 	}
-
 	return nil
 }
-
-//Get user from email
-func(m UserModel) GetByEmail(email string) (*User, error) {
+// Get user based on their email
+func (m UserModel) GetByEmail(email string) (*User, error) {
 	query := `
-		SELECT id, created_at, name, email, password_hash, activated, version
+	    SELECT id, created_at, name, email, password_hash, activated, version
 		FROM users
 		WHERE email = $1
 	`
-
-	var user User 
-
+	var user User
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-
-	err:= m.DB.QueryRowContext(ctx, query, email).Scan(
+	err := m.DB.QueryRowContext(ctx, query, email).Scan(
 		&user.ID,
 		&user.CreatedAt,
 		&user.Name,
@@ -150,19 +142,17 @@ func(m UserModel) GetByEmail(email string) (*User, error) {
 			return nil, err
 		}
 	}
-
 	return &user, nil
 }
-
-//The client can update their information
+// The clinet can update their information
 func (m UserModel) Update(user *User) error {
 	query := `
-		UPDATE users
-		SET name $1, email = $2, password_hash = $3, activated = $4, version = version + 1
+	    UPDATE users
+		SET name = $1, email = $2, password_hash = $3, activated = $4, version = version + 1
 		WHERE id = $5 AND version = $6
 		RETURNING version
 	`
-	args :=[]interface{}{
+	args := []interface{}{
 		user.Name,
 		user.Email,
 		user.Password.hash,
@@ -172,7 +162,6 @@ func (m UserModel) Update(user *User) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-
 	err := m.DB.QueryRowContext(ctx, query, args...).Scan(&user.Version)
 	if err != nil {
 		switch {
@@ -183,14 +172,14 @@ func (m UserModel) Update(user *User) error {
 		}
 	}
 	return nil
+
 }
 
 func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error) {
 	tokenHash := sha256.Sum256([]byte(tokenPlaintext))
-	//setup query
+	// Setup query
 	query := `
-		SELECT users.id, users.created_at, users.name, users.email,
-		users.password_hash, users.activated, users.version
+	    SELECT users.id, users.created_at, users.name, users.email, users.password_hash, users.activated, users.version
 		FROM users
 		INNER JOIN tokens
 		ON users.id = tokens.user_id
@@ -203,14 +192,14 @@ func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	err = m.DB.QueryRowContext(ctx, query, args...).Scan(
+	err := m.DB.QueryRowContext(ctx, query, args...).Scan(
 		&user.ID,
-		&user.created_at,
+		&user.CreatedAt,
 		&user.Name,
 		&user.Email,
 		&user.Password.hash,
 		&user.Activated,
-		&user.Version
+		&user.Version,
 	)
 	if err != nil {
 		switch {

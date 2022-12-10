@@ -5,6 +5,7 @@ import (
     "database/sql"
     "flag"
     "fmt"
+    "strings"
     "net/http"
     "os"
     "sync"
@@ -36,6 +37,11 @@ type config struct {
         maxIdleConns int
         maxIdleTime string
     }
+    limiter struct {
+		rps     float64 // requests/second
+		burst   int
+		enabled bool
+	}
     smtp struct {
         host     string
         port     int
@@ -43,6 +49,9 @@ type config struct {
         password string
         sender   string
     }
+    cors struct {
+		trustedOrigins []string
+	}
 }
 
 // Define an application struct to hold the dependencies for our HTTP handlers, helpers,
@@ -69,11 +78,23 @@ func main() {
 	flag.IntVar(&cfg.db.maxIdleConns, "db-max-idle-conns", 25, "PostgreSQL max idle connection")
 	flag.StringVar(&cfg.db.maxIdleTime, "db-max-idle-time", "15m", "PostgreSQL max connection idle time")
 
+    // These are flags for the rate limiter
+	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 2, "Rate limiter maximum requests per second")
+	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate limiter maximum burst")
+	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
+
     flag.StringVar(&cfg.smtp.host, "smpt-host", "smtp.mailtrap.io", "SMPT host")
     flag.IntVar(&cfg.smtp.port, "smpt-port", 25, "SMPT port")
     flag.StringVar(&cfg.smtp.username, "smpt-username", "2003542b049ac5", "SMPT username")
     flag.StringVar(&cfg.smtp.password, "smpt-password", "641e59bb93068e", "SMPT Password")
     flag.StringVar(&cfg.smtp.sender, "smpt-sender", "BIO <no-reply@fitness.zioncastillo.net>", "SMPT Sender")
+
+    // Use the flag.Func() function to parse our trusted origins flag from
+	// a string to a slice of a string
+	flag.Func("cors-trusted-origins", "Trusted CORS origin (space separated)", func(val string) error {
+		cfg.cors.trustedOrigins = strings.Fields(val)
+		return nil
+	})
 
 	flag.Parse()
     // Initialize a new logger which writes messages to the standard out stream, 
